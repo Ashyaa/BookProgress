@@ -1,0 +1,12 @@
+# Habitica credentials
+login:
+  username:
+  password:
+# Habitica ID of the **script** author
+author_id: c78d5677-193b-4825-b6ec-fb0c1b9f0a93
+book:
+  title: The book I'm reading
+  # First numbered page of the book
+  first_page: 5
+  # Last numbered page of the book
+  last_page: 512

@@ -1,0 +1,164 @@
+#!/usr/bin/python3
+"""
+Book progress.
+
+Usage:
+  book_progress [--debug] <current_page>
+  book_progress -h | --help
+
+Options:
+  -h --help     Show this screen.
+  -d --debug    Activate debug traces.
+"""
+
+from pathlib import Path
+from typing import Dict, Optional
+
+from docopt import docopt
+from icecream import ic
+from requests import Response, get, post, put
+from yaml import FullLoader, load
+
+CWD = Path(__file__).parent
+CONFIG_FILE = CWD.joinpath("config.yml")
+
+SCRIPT_NAME = "Book Progress Updater"
+
+
+def trace(response: Response):
+    ic(
+        response.request.method,
+        response.request.url,
+        response.request.body,
+        response.status_code,
+        response.reason,
+    )
+    if response.status_code != 200:
+        ic(response.json())
+
+
+def read_config() -> Dict:
+    """read script YAML configuration file"""
+    if not CONFIG_FILE.exists():
+        print("missing config.yml file at script level")
+        exit(-1)
+    with CONFIG_FILE.open("r") as f:
+        config_data = load(f, Loader=FullLoader)
+    return config_data
+
+
+def login(config: Dict) -> Dict:
+    """login to habitica"""
+    r = post(
+        "https://habitica.com/api/v3/user/auth/local/login",
+        json=config["login"],
+    )
+    trace(r)
+    return r.json()
+
+
+def get_todo(config: Dict, headers: Dict) -> Optional[Dict]:
+    """get book TODO from habitica"""
+    book_name = config["book"]["title"]
+    url = "https://habitica.com/api/v3/tasks/user?type=todos"
+    response = get(url, headers=headers)
+    trace(response)
+    return next((t for t in response.json()["data"] if t["text"] == book_name), None)
+
+
+def create_todo(config: Dict, headers: Dict) -> Dict:
+    """Create a new TODO on habitica"""
+    url = "https://habitica.com/api/v3/tasks/user"
+    data = {
+        "text": config["book"]["title"],
+        "type": "todo",
+        "priority": 1.5,
+        "collapseChecklist": True,
+        "checklist": [{"text": f"{i}%"} for i in range(10, 101, 10)],
+    }
+    response = post(url, headers=headers, json=data)
+    trace(response)
+    return response.json()["data"]
+
+
+def update_todo(
+    config: Dict, headers: Dict, todo: Dict, progress: float, notes: str
+) -> None:
+    """Update the todo on habitica"""
+    trace(
+        put(
+            f"https://habitica.com/api/v3/tasks/{todo['id']}",
+            json={"notes": notes},
+            headers=headers,
+        )
+    )
+
+    # update progress in the todo
+    base_url = f"https://habitica.com/api/v3/tasks/{todo['id']}/checklist/"
+    for c in todo["checklist"]:
+        value = int(c["text"][:-1])
+        completed = progress >= value
+        if completed == c["completed"]:
+            continue
+        trace(
+            put(
+                base_url + c["id"],
+                json={"completed": completed, "text": c["text"]},
+                headers=h,
+            )
+        )
+
+    if progress == 100.0:
+        trace(
+            post(
+                f"https://habitica.com/api/v3/tasks/{todo['id']}/score/up",
+                headers=headers,
+            )
+        )
+
+
+# routine check
+if __name__ != "__main__":
+    exit(0)
+
+# load configuration
+config = read_config()
+
+BOOK_TITLE = config["book"]["title"]
+FIRST_PAGE = config["book"]["first_page"]
+LAST_PAGE = config["book"]["last_page"]
+PAGE_NB = LAST_PAGE - FIRST_PAGE
+
+AUTHOR_ID = config.get("author_id", "")
+
+# parse command line
+args = docopt(__doc__)
+
+if not args["--debug"]:
+    ic.disable()
+ic(args)
+
+# prepare data
+cur_page = ic(int(args["<current_page>"]))
+if not (FIRST_PAGE <= cur_page <= LAST_PAGE):
+    print(f"page number {cur_page} is not valid")
+    exit(1)
+pages_read = cur_page - FIRST_PAGE
+progress = 100 * pages_read / PAGE_NB
+
+user_data = login(config)
+
+h = {
+    "Content-Type": "application/json",
+    "x-client": f"{AUTHOR_ID}-{SCRIPT_NAME}",
+    "x-api-user": user_data["data"]["id"],
+    "x-api-key": user_data["data"]["apiToken"],
+}
+
+todo = get_todo(config, h)
+if todo is None:
+    todo = create_todo(config, h)
+notes = f"{pages_read}/{PAGE_NB} pages **({progress:.2f}%)**"
+print(notes)
+
+update_todo(config, h, todo, progress, notes)
