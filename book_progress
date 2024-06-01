@@ -27,6 +27,11 @@ SCRIPT_NAME = "Book Progress Updater"
 
 
 def trace(response: Response):
+    """Trace a HTTP response in the logs.
+
+    Args:
+        response (Response): Response from a HTTP request
+    """
     ic(
         response.request.method,
         response.request.url,
@@ -43,7 +48,7 @@ def read_config() -> Dict:
     if not CONFIG_FILE.exists():
         print("missing config.yml file at script level")
         exit(-1)
-    with CONFIG_FILE.open("r") as f:
+    with CONFIG_FILE.open("r", encoding="utf-8") as f:
         config_data = load(f, Loader=FullLoader)
     return config_data
 
@@ -125,7 +130,7 @@ if __name__ != "__main__":
 # load configuration
 config = read_config()
 
-BOOK_TITLE = config["book"]["title"]
+BOOK_TITLE = ic(config["book"]["title"])
 FIRST_PAGE = config["book"]["first_page"]
 LAST_PAGE = config["book"]["last_page"]
 PAGE_NB = LAST_PAGE - FIRST_PAGE
@@ -143,7 +148,7 @@ DRY_RUN = args["--dry-run"]
 
 # prepare data
 cur_page = ic(int(args["<current_page>"]))
-if not (FIRST_PAGE <= cur_page <= LAST_PAGE):
+if not FIRST_PAGE <= cur_page <= LAST_PAGE:
     print(f"page number {cur_page} is not valid")
     exit(1)
 pages_read = cur_page - FIRST_PAGE
